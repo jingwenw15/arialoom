@@ -14,6 +14,7 @@ import {
   Music2,
   Play,
   Plus,
+  Radio,
   Save,
   Sparkles,
   Square,
@@ -53,6 +54,7 @@ type VoiceMemo = {
   audioUrl: string;
   createdAt: string;
   durationSeconds: number;
+  arrangementBlockId?: string;
 };
 
 type SongVersion = {
@@ -83,6 +85,7 @@ type RecordingState = {
   recorder: MediaRecorder;
   startedAt: number;
   chunks: Blob[];
+  arrangementBlockId?: string;
 };
 
 const storageKey = "arialoom.project.v1";
@@ -272,7 +275,12 @@ function App() {
     });
   }
 
-  async function toggleRecording() {
+  function arrangementLabel(blockId?: string) {
+    if (!blockId) return "General";
+    return activeVersion.arrangement.find((block) => block.id === blockId)?.label ?? "Deleted section";
+  }
+
+  async function toggleRecording(arrangementBlockId?: string) {
     if (recording) {
       recording.recorder.stop();
       return;
@@ -291,10 +299,13 @@ function App() {
       reader.onload = () => {
         const memo: VoiceMemo = {
           id: id(),
-          title: `Voice memo ${activeVersion.voiceMemos.length + 1}`,
+          title: arrangementBlockId
+            ? `${arrangementLabel(arrangementBlockId)} take ${blockMemoCount(activeVersion, arrangementBlockId) + 1}`
+            : `Voice memo ${activeVersion.voiceMemos.length + 1}`,
           audioUrl: String(reader.result),
           createdAt: now(),
           durationSeconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
+          arrangementBlockId,
         };
         updateActiveVersion({ voiceMemos: [...activeVersion.voiceMemos, memo] });
         stream.getTracks().forEach((track) => track.stop());
@@ -303,7 +314,7 @@ function App() {
       reader.readAsDataURL(blob);
     };
     recorder.start();
-    setRecording({ recorder, chunks, startedAt });
+    setRecording({ recorder, chunks, startedAt, arrangementBlockId });
   }
 
   function exportJson() {
@@ -519,9 +530,9 @@ function App() {
           <aside className="right-rail">
             <section className="panel">
               <PanelHeader icon={<Upload size={17} />} title="Voice" />
-              <button className={`record-button ${recording ? "recording" : ""}`} onClick={toggleRecording}>
+              <button className={`record-button ${recording && !recording.arrangementBlockId ? "recording" : ""}`} onClick={() => toggleRecording()}>
                 {recording ? <Square size={18} /> : <Mic size={18} />}
-                {recording ? "Stop recording" : "Record idea"}
+                {recording && !recording.arrangementBlockId ? "Stop recording" : "Record general idea"}
               </button>
               <div className="memo-list">
                 {activeVersion.voiceMemos.length === 0 ? (
@@ -532,7 +543,7 @@ function App() {
                       <audio src={memo.audioUrl} controls />
                       <div>
                         <strong>{memo.title}</strong>
-                        <small>{memo.durationSeconds}s</small>
+                        <small>{arrangementLabel(memo.arrangementBlockId)} · {memo.durationSeconds}s</small>
                       </div>
                     </div>
                   ))
@@ -584,6 +595,23 @@ function App() {
                     Energy
                     <input type="range" min={1} max={5} value={block.energy} onChange={(event) => updateBlock(block.id, { energy: Number(event.target.value) })} />
                   </label>
+                </div>
+                <button
+                  className={`block-record-button ${recording?.arrangementBlockId === block.id ? "recording" : ""}`}
+                  onClick={() => toggleRecording(block.id)}
+                >
+                  {recording?.arrangementBlockId === block.id ? <Square size={15} /> : <Radio size={15} />}
+                  {recording?.arrangementBlockId === block.id ? "Stop take" : "Record this part"}
+                </button>
+                <div className="block-memos">
+                  {activeVersion.voiceMemos
+                    .filter((memo) => memo.arrangementBlockId === block.id)
+                    .map((memo) => (
+                      <div className="block-memo" key={memo.id}>
+                        <audio src={memo.audioUrl} controls />
+                        <span>{memo.title}</span>
+                      </div>
+                    ))}
                 </div>
               </article>
             ))}
@@ -667,10 +695,26 @@ function compareVersions(left: SongVersion, right: SongVersion) {
   return changes.length > 0 ? changes : ["No differences"];
 }
 
+function blockMemoCount(version: SongVersion, blockId: string) {
+  return version.voiceMemos.filter((memo) => memo.arrangementBlockId === blockId).length;
+}
+
 function markdown(project: SongProject, version: SongVersion) {
   const lyrics = version.lyricSections.map((section) => `## ${section.title}\n\n${section.lines}`).join("\n\n");
   const chords = version.chords.map((chord) => `## ${chord.name}\n\n${chord.text}`).join("\n\n");
-  const arrangement = version.arrangement.map((block) => `- ${block.label}: ${block.bars} bars, energy ${block.energy}/5`).join("\n");
+  const arrangement = version.arrangement
+    .map((block) => {
+      const takes = version.voiceMemos
+        .filter((memo) => memo.arrangementBlockId === block.id)
+        .map((memo) => `  - Take: ${memo.title} (${memo.durationSeconds}s)`)
+        .join("\n");
+      return `- ${block.label}: ${block.bars} bars, energy ${block.energy}/5${takes ? `\n${takes}` : ""}`;
+    })
+    .join("\n");
+  const generalMemos = version.voiceMemos
+    .filter((memo) => !memo.arrangementBlockId)
+    .map((memo) => `- ${memo.title} (${memo.durationSeconds}s)`)
+    .join("\n");
   return `# ${project.title}
 
 Version: ${version.name}
@@ -680,6 +724,10 @@ Tempo: ${project.tempo} BPM
 # Arrangement
 
 ${arrangement}
+
+# Voice Memos
+
+${generalMemos || "No general memos."}
 
 # Chords
 
