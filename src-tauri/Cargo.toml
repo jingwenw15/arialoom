@@ -1,0 +1,17 @@
+[package]
+name = "arialoom"
+version = "0.1.0"
+description = "A songwriting workspace for versions, lyrics, chords, arrangements, and voice notes."
+authors = ["Arialoom"]
+edition = "2021"
+
+[lib]
+name = "arialoom_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.1", features = [] }
+tauri-plugin-opener = "2.5.0"
